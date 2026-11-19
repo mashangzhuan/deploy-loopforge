@@ -1,0 +1,17 @@
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.history/
+.screenshots/
+.git/
+
+# 本地环境变量与密钥
+.env
+.env.*
+*.local
+
+# 日志与临时文件
+*.log
+*.tmp
