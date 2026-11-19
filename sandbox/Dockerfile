@@ -70,6 +70,6 @@ RUN npm install -g pnpm@latest \
 RUN pnpm config set registry https://registry.npmmirror.com
 
 # Agent CLI（走已配置的 npm 国内源）
-RUN npm install -g @tencent-ai/codebuddy-code@latest @openai/codex@latest @anthropic-ai/claude-code@latest @deepseek-ai/dsh@latest
+RUN npm install -g @tencent-ai/codebuddy-code@latest @openai/codex@latest @deepseek-ai/dsh@latest
 
 WORKDIR /workspace
