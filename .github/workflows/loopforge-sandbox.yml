@@ -2,6 +2,12 @@ name: Build LoopForge Sandbox Image
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - sandbox/Dockerfile
+      - .github/workflows/loopforge-sandbox.yml
 
 jobs:
   build:
