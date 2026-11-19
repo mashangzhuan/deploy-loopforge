@@ -14,6 +14,7 @@ One command on a Linux server: generate a custom sandbox image → build and pus
 - **Auto-fix git HTTPS**: when `git-remote-https` is missing, installs `git-http` automatically via `opkg`, `apt`, `yum` or `apk`
 - **Incremental image pull**: compares local and remote image digests before pulling and skips the download when the local image is already up to date
 - **Skip unnecessary builds**: uses Git blob SHA to compare locally generated Dockerfile/workflow with the remote repository; skips both upload and workflow dispatch when identical
+- **`-f`/`--force` mode**: bypasses all cache checks, always uploads files, dispatches workflow and re-pulls image
 
 ## Prerequisites
 

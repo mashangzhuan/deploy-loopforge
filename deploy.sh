@@ -34,6 +34,7 @@ declare -A MSG_ZH=(
   [opt_pat]="  --pat <token>            仓库 PAT，Fine-grained 或 Classic 均可"
   [opt_repo]="  --repo <用户名/仓库名>   GitHub 构建仓库"
   [opt_classic]="  --classic-pat <token>    GHCR Classic PAT，等价环境变量 CLASSIC_PAT"
+  [opt_force]="  -f, --force              忽略缓存，强制触发 workflow 并重新拉取镜像"
   [opt_lang]="  --lang <zh|en>           输出语言，默认 zh"
   [opt_help]="  -h, --help               显示帮助"
   [agents_supported]="支持的 Agent CLI: %s（claude 为 claude-code 的别名）"
@@ -89,6 +90,7 @@ declare -A MSG_ZH=(
   [image_up_to_date]="本地镜像已是最新，跳过拉取。"
   [image_outdated]="检测到新镜像，开始拉取..."
   [image_no_local]="本地未找到镜像，开始拉取..."
+  [force_repull]="--force 模式：跳过 digest 对比，强制重新拉取镜像"
   [step7]=">>> [7/9] 检查 compose.yaml 中的镜像和沙箱配置..."
   [step7_note]="请根据当前版本确认自定义镜像的接入方式；镜像已拉取不代表已被 LoopForge 使用。"
   [step8]=">>> [8/9] 安装并启动 LoopForge..."
@@ -106,6 +108,7 @@ declare -A MSG_EN=(
   [opt_pat]="  --pat <token>           Repository PAT, fine-grained or classic"
   [opt_repo]="  --repo <owner/repo>     GitHub repository used for the build"
   [opt_classic]="  --classic-pat <token>   GHCR classic PAT (same as CLASSIC_PAT env)"
+  [opt_force]="  -f, --force              ignore caches, always dispatch workflow and re-pull image"
   [opt_lang]="  --lang <zh|en>          Output language, default zh"
   [opt_help]="  -h, --help              Show this help"
   [agents_supported]="Supported Agent CLIs: %s (claude is an alias of claude-code)"
@@ -161,6 +164,7 @@ declare -A MSG_EN=(
   [image_up_to_date]="Local image is already up to date, skipping pull."
   [image_outdated]="New image detected, pulling..."
   [image_no_local]="Image not found locally, pulling..."
+  [force_repull]="--force mode: skipping digest check, re-pulling image."
   [step7]=">>> [7/9] Checking image and sandbox settings in compose.yaml..."
   [step7_note]="Confirm how this version consumes a custom image; pulling it does not mean LoopForge uses it."
   [step8]=">>> [8/9] Installing and starting LoopForge..."
@@ -218,6 +222,8 @@ while [ "$#" -gt 0 ]; do
     --classic-pat)
       [ "$#" -ge 2 ] || { msg missing_value "--classic-pat"; echo; exit 1; }
       CLASSIC_PAT_ARG="$2"; shift 2 ;;
+    -f|--force)
+      FORCE=1; shift ;;
     --lang)
       [ "$#" -ge 2 ] || { msg missing_value "--lang"; echo; exit 1; }
       case "${2,,}" in
@@ -458,8 +464,8 @@ upload_file_to_github() {
   remote_sha=$(printf '%s' "$remote_json" | jq -r '.sha // empty')
   remote_b64=$(printf '%s' "$remote_json" | jq -r '.content // empty')
 
-  # 远端文件存在，对比内容：本地 blob SHA vs 远端 blob SHA
-  if [ -n "$remote_sha" ] && [ "$local_sha" = "$remote_sha" ]; then
+  # 远端文件存在，对比内容：本地 blob SHA vs 远端 blob SHA（FORCE=1 时跳过对比）
+  if [ -z "${FORCE:-}" ] && [ -n "$remote_sha" ] && [ "$local_sha" = "$remote_sha" ]; then
     msg upload_skipped "$file_path"
     echo
     return 2  # 2 = 跳过，无变化
@@ -631,6 +637,7 @@ if [ -z "$DOCKERFILE_CONTENT" ]; then
 fi
 
 NEEDS_BUILD=false
+[ -n "${FORCE:-}" ] && NEEDS_BUILD=true
 
 if upload_file_to_github "$DOCKERFILE_PATH" "$DOCKERFILE_CONTENT" \
   "chore: upload LoopForge sandbox Dockerfile [skip ci]"; then
@@ -728,7 +735,10 @@ echo
 echo "$CLASSIC_PAT" | docker login ghcr.io -u "$OWNER" --password-stdin
 
 skip_pull=false
-if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+if [ -n "${FORCE:-}" ]; then
+  msg force_repull
+  echo
+elif docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   local_digest=$(docker image inspect "$IMAGE_NAME" \
     --format '{{range .RepoDigests}}{{println .}}{{end}}' 2>/dev/null \
     | grep "@sha256:" | head -1 | sed 's/.*@//')
