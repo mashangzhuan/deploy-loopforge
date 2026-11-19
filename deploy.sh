@@ -82,8 +82,11 @@ declare -A MSG_ZH=(
   [build_failed]="  镜像构建失败，结论: %s"
   [check_run]="  请查看: %s"
   [build_timeout]="等待构建超时，请手动检查 Actions: %s"
-  [step5]=">>> [5/9] 登录 GHCR 并拉取镜像..."
+  [step5]=">>> [5/9] 登录 GHCR 并检查镜像更新..."
   [step6]=">>> [6/9] 准备 LoopForge 官方仓库..."
+  [image_up_to_date]="本地镜像已是最新，跳过拉取。"
+  [image_outdated]="检测到新镜像，开始拉取..."
+  [image_no_local]="本地未找到镜像，开始拉取..."
   [step7]=">>> [7/9] 检查 compose.yaml 中的镜像和沙箱配置..."
   [step7_note]="请根据当前版本确认自定义镜像的接入方式；镜像已拉取不代表已被 LoopForge 使用。"
   [step8]=">>> [8/9] 安装并启动 LoopForge..."
@@ -149,8 +152,11 @@ declare -A MSG_EN=(
   [build_failed]="  Image build failed, conclusion: %s"
   [check_run]="  See: %s"
   [build_timeout]="Timed out waiting for the build; check Actions manually: %s"
-  [step5]=">>> [5/9] Logging in to GHCR and pulling the image..."
+  [step5]=">>> [5/9] Logging in to GHCR and checking for image updates..."
   [step6]=">>> [6/9] Preparing the upstream LoopForge repository..."
+  [image_up_to_date]="Local image is already up to date, skipping pull."
+  [image_outdated]="New image detected, pulling..."
+  [image_no_local]="Image not found locally, pulling..."
   [step7]=">>> [7/9] Checking image and sandbox settings in compose.yaml..."
   [step7_note]="Confirm how this version consumes a custom image; pulling it does not mean LoopForge uses it."
   [step8]=">>> [8/9] Installing and starting LoopForge..."
@@ -684,11 +690,34 @@ for ((i = 1; i <= 60; i++)); do
   sleep 120
 done
 
-# 步骤 5：使用 Classic PAT 登录 GHCR 并拉取镜像
+# 步骤 5：使用 Classic PAT 登录 GHCR，对比 digest 后按需拉取镜像
 msg step5
 echo
 echo "$CLASSIC_PAT" | docker login ghcr.io -u "$OWNER" --password-stdin
-docker pull "$IMAGE_NAME"
+
+skip_pull=false
+if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+  local_digest=$(docker image inspect "$IMAGE_NAME" \
+    --format '{{range .RepoDigests}}{{println .}}{{end}}' 2>/dev/null \
+    | grep "@sha256:" | head -1 | sed 's/.*@//')
+  remote_digest=$(docker buildx imagetools inspect "$IMAGE_NAME" \
+    --format '{{.Manifest.Digest}}' 2>/dev/null || echo "")
+  if [ -n "$local_digest" ] && [ -n "$remote_digest" ] && [ "$local_digest" = "$remote_digest" ]; then
+    skip_pull=true
+    msg image_up_to_date
+    echo
+  else
+    msg image_outdated
+    echo
+  fi
+else
+  msg image_no_local
+  echo
+fi
+
+if [ "$skip_pull" = false ]; then
+  docker pull "$IMAGE_NAME"
+fi
 
 # 步骤 6：克隆 LoopForge
 msg step6
