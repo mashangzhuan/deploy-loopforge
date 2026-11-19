@@ -12,6 +12,7 @@ One command on a Linux server: generate a custom sandbox image → build and pus
 - **Automated deployment**: log in to GHCR with a classic PAT, clone the official LoopForge repository and run `start.sh`
 - **Bilingual**: all prompts, logs and errors are available in Chinese and English
 - **Auto-fix git HTTPS**: when `git-remote-https` is missing, installs `git-http` automatically via `opkg`, `apt`, `yum` or `apk`
+- **Incremental image pull**: compares local and remote image digests before pulling and skips the download when the local image is already up to date
 
 ## Prerequisites
 
