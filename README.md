@@ -13,6 +13,7 @@
 - **中英双语**：所有提示、日志和报错均支持中文与英文
 - **自动修复 git HTTPS**：检测到 `git-remote-https` 缺失时，自动通过 `opkg`/`apt`/`yum`/`apk` 安装 `git-http`
 - **增量拉取镜像**：拉取前对比本地与远端镜像 digest，已是最新则跳过下载
+- **跳过无用构建**：用 Git blob SHA 对比本地生成的 Dockerfile/workflow 与远端仓库文件，完全一致则跳过上传和 workflow 触发
 
 ## 前提条件
 

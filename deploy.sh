@@ -75,6 +75,8 @@ declare -A MSG_ZH=(
   [workflow_missing]="未找到 .github/workflows/loopforge-sandbox.yml，且未设置 WORKFLOW_CONTENT。"
   [files_pushed]="  文件推送完成，等待 GitHub 处理..."
   [step3]=">>> [3/9] 触发 GitHub Actions 构建..."
+  [upload_skipped]="%s 内容未变化，跳过上传"
+  [dispatch_skipped]="Dockerfile 与 workflow 均未变化，跳过 workflow 触发"
   [dispatch_failed]="触发 workflow 失败 (HTTP %s)"
   [step4]=">>> [4/9] 等待 GitHub Actions 构建完成..."
   [query_failed]="查询 Actions 状态失败 (HTTP %s)"
@@ -145,6 +147,8 @@ declare -A MSG_EN=(
   [workflow_missing]="Missing .github/workflows/loopforge-sandbox.yml and WORKFLOW_CONTENT is not set."
   [files_pushed]="  Files pushed, waiting for GitHub to process them..."
   [step3]=">>> [3/9] Triggering GitHub Actions build..."
+  [upload_skipped]="%s unchanged, skipping upload"
+  [dispatch_skipped]="Both Dockerfile and workflow are unchanged, skipping workflow dispatch"
   [dispatch_failed]="Failed to trigger the workflow (HTTP %s)"
   [step4]=">>> [4/9] Waiting for the GitHub Actions build..."
   [query_failed]="Failed to query Actions status (HTTP %s)"
@@ -441,22 +445,36 @@ upload_file_to_github() {
   local content="$2"
   local commit_message="$3"
 
+  # 计算本地 blob SHA（与 GitHub Contents API 返回的 sha 格式一致）
+  local local_sha
+  local_sha=$(printf 'blob %d\0%s' "${#content}" "$content" | sha1sum | cut -d' ' -f1)
+
+  # 获取远端当前文件的 sha 和内容 base64
+  local remote_json remote_sha remote_b64
+  remote_json=$(curl -s \
+    -H "Authorization: token $GITHUB_PAT" \
+    -H "Accept: application/vnd.github+json" \
+    "$GITHUB_API/repos/$REPO/contents/$file_path")
+  remote_sha=$(printf '%s' "$remote_json" | jq -r '.sha // empty')
+  remote_b64=$(printf '%s' "$remote_json" | jq -r '.content // empty')
+
+  # 远端文件存在，对比内容：本地 blob SHA vs 远端 blob SHA
+  if [ -n "$remote_sha" ] && [ "$local_sha" = "$remote_sha" ]; then
+    msg upload_skipped "$file_path"
+    echo
+    return 2  # 2 = 跳过，无变化
+  fi
+
+  # 远端文件不存在，或内容不同 → 上传
   local encoded_content
   encoded_content=$(printf '%s' "$content" | base64 -w 0)
 
-  local existing_sha
-  existing_sha=$(curl -s \
-    -H "Authorization: token $GITHUB_PAT" \
-    -H "Accept: application/vnd.github+json" \
-    "$GITHUB_API/repos/$REPO/contents/$file_path" \
-    | jq -r '.sha // empty')
-
   local body
-  if [ -n "$existing_sha" ]; then
+  if [ -n "$remote_sha" ]; then
     body=$(jq -n \
       --arg msg "$commit_message" \
       --arg content "$encoded_content" \
-      --arg sha "$existing_sha" \
+      --arg sha "$remote_sha" \
       '{message: $msg, content: $content, sha: $sha}')
   else
     body=$(jq -n \
@@ -483,6 +501,7 @@ upload_file_to_github() {
 
   msg upload_ok "$file_path"
   echo
+  return 0
 }
 
 generate_dockerfile() {
@@ -611,8 +630,12 @@ if [ -z "$DOCKERFILE_CONTENT" ]; then
   echo
 fi
 
-upload_file_to_github "$DOCKERFILE_PATH" "$DOCKERFILE_CONTENT" \
-  "chore: upload LoopForge sandbox Dockerfile [skip ci]"
+NEEDS_BUILD=false
+
+if upload_file_to_github "$DOCKERFILE_PATH" "$DOCKERFILE_CONTENT" \
+  "chore: upload LoopForge sandbox Dockerfile [skip ci]"; then
+  NEEDS_BUILD=true
+fi
 
 WORKFLOW_CONTENT="${WORKFLOW_CONTENT:-}"
 if [ -z "$WORKFLOW_CONTENT" ]; then
@@ -625,70 +648,79 @@ if [ -z "$WORKFLOW_CONTENT" ]; then
   fi
 fi
 
-upload_file_to_github "$WORKFLOW_PATH" "$WORKFLOW_CONTENT" \
-  "chore: upload LoopForge sandbox workflow [skip ci]"
-
-msg files_pushed
-echo
-sleep 3
-
-# 步骤 3：触发 workflow
-msg step3
-echo
-http_code=$(curl -s -o /tmp/loopforge_dispatch_resp.json -w "%{http_code}" \
-  -X POST \
-  -H "Authorization: token $GITHUB_PAT" \
-  -H "Accept: application/vnd.github+json" \
-  -H "Content-Type: application/json" \
-  -d '{"ref":"main"}' \
-  "$GITHUB_API/repos/$REPO/actions/workflows/loopforge-sandbox.yml/dispatches")
-if [ "$http_code" != "204" ]; then
-  msg dispatch_failed "$http_code"
-  echo
-  cat /tmp/loopforge_dispatch_resp.json
-  exit 1
+if upload_file_to_github "$WORKFLOW_PATH" "$WORKFLOW_CONTENT" \
+  "chore: upload LoopForge sandbox workflow [skip ci]"; then
+  NEEDS_BUILD=true
 fi
 
-# 步骤 4：轮询构建结果，每 2 分钟一次，最多 60 次
-msg step4
-echo
-run_url=""
-for ((i = 1; i <= 60; i++)); do
-  http_code=$(curl -s -o /tmp/loopforge_runs_resp.json -w "%{http_code}" \
+if [ "$NEEDS_BUILD" = false ]; then
+  msg dispatch_skipped
+  echo
+else
+  msg files_pushed
+  echo
+  sleep 3
+fi
+
+# 步骤 3 & 4：触发 workflow 并等待构建
+if [ "$NEEDS_BUILD" = true ]; then
+  msg step3
+  echo
+  http_code=$(curl -s -o /tmp/loopforge_dispatch_resp.json -w "%{http_code}" \
+    -X POST \
     -H "Authorization: token $GITHUB_PAT" \
     -H "Accept: application/vnd.github+json" \
-    "$GITHUB_API/repos/$REPO/actions/runs?event=workflow_dispatch&per_page=1")
-  if [ "$http_code" != "200" ]; then
-    msg query_failed "$http_code"
+    -H "Content-Type: application/json" \
+    -d '{"ref":"main"}' \
+    "$GITHUB_API/repos/$REPO/actions/workflows/loopforge-sandbox.yml/dispatches")
+  if [ "$http_code" != "204" ]; then
+    msg dispatch_failed "$http_code"
     echo
-    cat /tmp/loopforge_runs_resp.json
+    cat /tmp/loopforge_dispatch_resp.json
     exit 1
   fi
 
-  status=$(jq -r '.workflow_runs[0].status // empty' /tmp/loopforge_runs_resp.json)
-  conclusion=$(jq -r '.workflow_runs[0].conclusion // empty' /tmp/loopforge_runs_resp.json)
-  run_url=$(jq -r '.workflow_runs[0].html_url // empty' /tmp/loopforge_runs_resp.json)
-
-  if [ "$status" = "completed" ]; then
-    if [ "$conclusion" = "success" ]; then
-      msg build_success "$run_url"
+  # 步骤 4：轮询构建结果，每 2 分钟一次，最多 60 次
+  msg step4
+  echo
+  run_url=""
+  for ((i = 1; i <= 60; i++)); do
+    http_code=$(curl -s -o /tmp/loopforge_runs_resp.json -w "%{http_code}" \
+      -H "Authorization: token $GITHUB_PAT" \
+      -H "Accept: application/vnd.github+json" \
+      "$GITHUB_API/repos/$REPO/actions/runs?event=workflow_dispatch&per_page=1")
+    if [ "$http_code" != "200" ]; then
+      msg query_failed "$http_code"
       echo
-      break
+      cat /tmp/loopforge_runs_resp.json
+      exit 1
     fi
-    msg build_failed "${conclusion:-unknown}"
-    echo
-    msg check_run "$run_url"
-    echo
-    exit 1
-  fi
 
-  if [ "$i" -eq 60 ]; then
-    msg build_timeout "$run_url"
-    echo
-    exit 1
-  fi
-  sleep 120
-done
+    status=$(jq -r '.workflow_runs[0].status // empty' /tmp/loopforge_runs_resp.json)
+    conclusion=$(jq -r '.workflow_runs[0].conclusion // empty' /tmp/loopforge_runs_resp.json)
+    run_url=$(jq -r '.workflow_runs[0].html_url // empty' /tmp/loopforge_runs_resp.json)
+
+    if [ "$status" = "completed" ]; then
+      if [ "$conclusion" = "success" ]; then
+        msg build_success "$run_url"
+        echo
+        break
+      fi
+      msg build_failed "${conclusion:-unknown}"
+      echo
+      msg check_run "$run_url"
+      echo
+      exit 1
+    fi
+
+    if [ "$i" -eq 60 ]; then
+      msg build_timeout "$run_url"
+      echo
+      exit 1
+    fi
+    sleep 120
+  done
+fi
 
 # 步骤 5：使用 Classic PAT 登录 GHCR，对比 digest 后按需拉取镜像
 msg step5
