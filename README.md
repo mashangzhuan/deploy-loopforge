@@ -11,6 +11,7 @@
 - **自动构建**：将 Dockerfile 和 workflow 推送到指定 GitHub 仓库，触发 Actions 构建并推送 `ghcr.io/<owner>/<repo>/loopforge-sandbox:latest`
 - **自动部署**：使用 Classic PAT 拉取镜像，克隆官方 LoopForge 仓库并执行 `start.sh`
 - **中英双语**：所有提示、日志和报错均支持中文与英文
+- **自动修复 git HTTPS**：检测到 `git-remote-https` 缺失时，自动通过 `opkg`/`apt`/`yum`/`apk` 安装 `git-http`
 
 ## 前提条件
 

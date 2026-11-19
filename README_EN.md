@@ -11,6 +11,7 @@ One command on a Linux server: generate a custom sandbox image → build and pus
 - **Automated build**: push the Dockerfile and workflow to a GitHub repository, trigger Actions, and push `ghcr.io/<owner>/<repo>/loopforge-sandbox:latest`
 - **Automated deployment**: log in to GHCR with a classic PAT, clone the official LoopForge repository and run `start.sh`
 - **Bilingual**: all prompts, logs and errors are available in Chinese and English
+- **Auto-fix git HTTPS**: when `git-remote-https` is missing, installs `git-http` automatically via `opkg`, `apt`, `yum` or `apk`
 
 ## Prerequisites
 

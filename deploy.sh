@@ -54,6 +54,10 @@ declare -A MSG_ZH=(
   [summary_toolchains]="开发工具链: %s"
   [none]="无"
   [dep_missing]="缺少依赖: %s"
+  [git_remote_missing]="git 不支持 HTTPS 克隆（缺少 git-remote-https）"
+  [git_remote_installing]="正在尝试自动安装 git-http 支持..."
+  [git_remote_installed]="git-http 安装成功"
+  [git_remote_install_failed]="自动安装失败，请手动安装 git-http 后重试"
   [lang_question]="请选择语言 / Choose language: 1) 中文 2) English [1]: "
   [lang_invalid]="无效的选择。 / Invalid choice."
   [lang_unsupported]="不支持的语言: %s（可选 zh|en）"
@@ -117,6 +121,10 @@ declare -A MSG_EN=(
   [summary_toolchains]="Toolchains: %s"
   [none]="none"
   [dep_missing]="Missing dependency: %s"
+  [git_remote_missing]="git does not support HTTPS cloning (missing git-remote-https)"
+  [git_remote_installing]="Attempting to install git-http support..."
+  [git_remote_installed]="git-http installed successfully"
+  [git_remote_install_failed]="Auto-install failed. Please install git-http manually and retry."
   [lang_question]="Please choose language / 请选择语言: 1) 中文 2) English [1]: "
   [lang_invalid]="Invalid choice. / 无效的选择。"
   [lang_unsupported]="Unsupported language: %s (zh|en)"
@@ -356,6 +364,51 @@ if ! docker compose version >/dev/null 2>&1; then
   echo
   exit 1
 fi
+
+# 步骤 0.5：检测并修复 git HTTPS 支持
+ensure_git_remote_https() {
+  local exec_path
+  exec_path="$(git --exec-path)"
+  if [ -x "${exec_path}/git-remote-https" ] || [ -x "${exec_path}/git-remote-http" ]; then
+    return 0
+  fi
+
+  msg git_remote_missing
+  echo
+  msg git_remote_installing
+  echo
+
+  if command -v opkg >/dev/null 2>&1; then
+    if sudo opkg update && sudo opkg install git-http; then
+      msg git_remote_installed
+      echo
+      return 0
+    fi
+  elif command -v apt-get >/dev/null 2>&1; then
+    if sudo apt-get update && sudo apt-get install -y --reinstall git; then
+      msg git_remote_installed
+      echo
+      return 0
+    fi
+  elif command -v yum >/dev/null 2>&1; then
+    if sudo yum install -y git; then
+      msg git_remote_installed
+      echo
+      return 0
+    fi
+  elif command -v apk >/dev/null 2>&1; then
+    if sudo apk add git; then
+      msg git_remote_installed
+      echo
+      return 0
+    fi
+  fi
+
+  msg git_remote_install_failed
+  echo
+  exit 1
+}
+ensure_git_remote_https
 
 # 步骤 1：验证 PAT 和仓库访问
 msg step1
