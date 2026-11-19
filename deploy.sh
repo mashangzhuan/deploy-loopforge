@@ -59,7 +59,7 @@ declare -A MSG_ZH=(
   [git_remote_installing]="正在尝试自动安装 git-http 支持..."
   [git_remote_installed]="git-http 安装成功"
   [git_remote_install_failed]="自动安装失败，请手动安装 git-http 后重试"
-  [git_remote_hint]="当前使用的 git 是 %s，其目录缺少 git-remote-https。请改用带 HTTP 支持的 git，例如 Entware: opkg install git-http，或 SYNOCommunity 的 git 套件，并确保它在 PATH 中优先。"
+  [git_remote_hint]="当前使用的 git 是 %s，缺少 git-remote-https。可安装带 HTTP 支持的 git（Debian/Ubuntu: sudo apt-get install --reinstall git；Entware: opkg install git-http），并确保它优先于 /usr/local/bin/git 之类的自编译版本。"
   [lang_question]="请选择语言 / Choose language: 1) 中文 2) English [1]: "
   [lang_invalid]="无效的选择。 / Invalid choice."
   [lang_unsupported]="不支持的语言: %s（可选 zh|en）"
@@ -134,7 +134,7 @@ declare -A MSG_EN=(
   [git_remote_installing]="Attempting to install git-http support..."
   [git_remote_installed]="git-http installed successfully"
   [git_remote_install_failed]="Auto-install failed. Please install git-http manually and retry."
-  [git_remote_hint]="The git in use is %s and its libexec lacks git-remote-https. Install a git build with HTTP support (Entware: opkg install git-http, or the SynoCommunity git package) and make sure it comes first in PATH."
+  [git_remote_hint]="The git in use is %s and lacks git-remote-https. Install a git build with HTTP support (Debian/Ubuntu: sudo apt-get install --reinstall git; Entware: opkg install git-http) and make sure it takes precedence over self-built copies such as /usr/local/bin/git."
   [lang_question]="Please choose language / 请选择语言: 1) 中文 2) English [1]: "
   [lang_invalid]="Invalid choice. / 无效的选择。"
   [lang_unsupported]="Unsupported language: %s (zh|en)"
@@ -362,8 +362,8 @@ OWNER="${REPO%%/*}"
 IMAGE_NAME="ghcr.io/${REPO}/loopforge-sandbox:latest"
 LOOPFORGE_DIR="${LOOPFORGE_DIR:-/opt/loopforge}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 固定使用当前用户 PATH 中的 git，避免 sudo 自带的 git 缺少 remote-https
-GIT_BIN="$(command -v git || true)"
+# GIT_BIN 在步骤 0.5 中通过 pick_git_bin 选出真正支持 HTTPS 的 git
+GIT_BIN=""
 
 msg summary_agents "${AGENTS_CLI:-$(msg none)}"
 echo
@@ -385,15 +385,42 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-# 步骤 0.5：检测并修复 git HTTPS 支持
+# 步骤 0.5：选择支持 HTTPS 的 git，并在缺失时尝试安装
 git_https_ready() {
-  local exec_path
-  exec_path="$("$GIT_BIN" --exec-path 2>/dev/null || echo /nonexistent)"
-  [ -x "${exec_path}/git-remote-https" ] || [ -x "${exec_path}/git-remote-http" ]
+  local exec_path helper
+  { [ -n "${1:-}" ] && [ -x "$1" ]; } || return 1
+  exec_path="$("$1" --exec-path 2>/dev/null || true)"
+  [ -n "$exec_path" ] || return 1
+  for helper in git-remote-https git-remote-http git-remote-https.exe git-remote-http.exe; do
+    [ -x "${exec_path}/${helper}" ] && return 0
+  done
+  return 1
+}
+
+# 遍历 PATH 中的全部 git 及常见安装位置，选出第一个支持 HTTPS 的
+pick_git_bin() {
+  local cand
+  local -a candidates=()
+  while IFS= read -r cand; do
+    [ -n "$cand" ] && candidates+=("$cand")
+  done < <(type -ap git 2>/dev/null || true)
+  candidates+=(/usr/bin/git /usr/local/bin/git /opt/bin/git)
+
+  for cand in "${candidates[@]}"; do
+    if git_https_ready "$cand"; then
+      GIT_BIN="$cand"
+      return 0
+    fi
+  done
+
+  GIT_BIN="$(command -v git || true)"
+  return 1
 }
 
 ensure_git_remote_https() {
-  git_https_ready && return 0
+  if pick_git_bin; then
+    return 0
+  fi
 
   msg git_remote_missing
   echo
@@ -410,8 +437,8 @@ ensure_git_remote_https() {
     sudo apk add git || true
   fi
 
-  # 安装后复核：包管理器成功不代表当前 git 二进制就有该辅助程序
-  if git_https_ready; then
+  # 安装后重新挑选：PATH 中可能有多个 git，需命中带 remote-https 的那个
+  if pick_git_bin; then
     msg git_remote_installed
     echo
     return 0
@@ -419,7 +446,7 @@ ensure_git_remote_https() {
 
   msg git_remote_install_failed
   echo
-  msg git_remote_hint "$GIT_BIN"
+  msg git_remote_hint "${GIT_BIN:-git}"
   echo
   exit 1
 }
