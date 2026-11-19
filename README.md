@@ -7,7 +7,7 @@
 ## 功能
 
 - **按需生成 Dockerfile**：通过参数选择镜像内置的 Agent CLI 和开发工具链，不再依赖固定模板
-- **国内镜像加速**：apt 用中科大、Node.js 用清华、npm/pnpm 用 npmmirror、pip 用清华、Cargo/Go 用中科大与 goproxy.cn
+- **工具链官方源 + 依赖国内镜像**：apt、Go、Rust、Node.js 等运行时从官方源下载；npm/pnpm、pip、Cargo、GOPROXY 等语言级依赖按所选语言配置国内镜像
 - **自动构建**：将 Dockerfile 和 workflow 推送到指定 GitHub 仓库，触发 Actions 构建并推送 `ghcr.io/<owner>/<repo>/loopforge-sandbox:latest`
 - **自动部署**：使用 Classic PAT 拉取镜像，克隆官方 LoopForge 仓库并执行 `start.sh`
 - **中英双语**：所有提示、日志和报错均支持中文与英文

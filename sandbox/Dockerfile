@@ -2,32 +2,24 @@ FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-ENV RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static \
-    RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup \
-    RUSTUP_HOME=/opt/rustup \
+ENV RUSTUP_HOME=/opt/rustup \
     CARGO_HOME=/opt/cargo
 
 ENV PATH=/opt/cargo/bin:/usr/local/go/bin:$PATH \
     GOPATH=/root/go
 
-# Debian APT 国内镜像
-RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g; s|security.debian.org|mirrors.ustc.edu.cn|g' \
-    /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g; s|security.debian.org|mirrors.ustc.edu.cn|g' \
-    /etc/apt/sources.list
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Python（apt 走中科大镜像，pip 走清华镜像）
+# Python（apt 走官方源，pip 走清华镜像）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv python-is-python3 \
     && rm -rf /var/lib/apt/lists/* \
     && printf '[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\n' > /etc/pip.conf \
     && python --version && pip --version
 
-# Rust（rustup 走中科大镜像）
+# Rust（rustup 走官方源）
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
     && rustc --version && cargo --version
 
@@ -40,21 +32,21 @@ replace-with = 'ustc'
 registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
 EOF
 
-# Go（二进制走中科大镜像）
+# Go（二进制走官方源）
 ARG GO_VERSION=1.24.2
-RUN curl -fsSL "https://mirrors.ustc.edu.cn/golang/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
+RUN curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
     && tar -C /usr/local -xzf /tmp/go.tgz \
     && rm /tmp/go.tgz \
     && go version \
     && go env -w GOPROXY=https://goproxy.cn,direct \
     && go env -w GOSUMDB=off
 
-# Node.js（NodeSource 走清华镜像）
+# Node.js（NodeSource 走官方源）
 RUN apt-get update && apt-get install -y --no-install-recommends gnupg \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/nodesource/dist_20.x/nodesource.gpg.key \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://mirrors.tuna.tsinghua.edu.cn/nodesource/deb_20.x nodistro main" \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && node -v && npm -v \

@@ -7,7 +7,7 @@ One command on a Linux server: generate a custom sandbox image → build and pus
 ## Features
 
 - **On-demand Dockerfile generation**: choose the Agent CLIs and dev toolchains baked into the image instead of relying on a fixed template
-- **China-based mirrors**: apt via USTC, Node.js via Tsinghua, npm/pnpm via npmmirror, pip via Tsinghua, Cargo/Go via USTC and goproxy.cn
+- **Official toolchain sources with China-based package mirrors**: runtimes such as apt, Go, Rust and Node.js are downloaded from official sources; language-level dependencies (npm/pnpm, pip, Cargo, GOPROXY) use China mirrors based on the selected toolchains
 - **Automated build**: push the Dockerfile and workflow to a GitHub repository, trigger Actions, and push `ghcr.io/<owner>/<repo>/loopforge-sandbox:latest`
 - **Automated deployment**: log in to GHCR with a classic PAT, clone the official LoopForge repository and run `start.sh`
 - **Bilingual**: all prompts, logs and errors are available in Chinese and English
