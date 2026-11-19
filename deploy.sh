@@ -59,6 +59,7 @@ declare -A MSG_ZH=(
   [git_remote_installing]="正在尝试自动安装 git-http 支持..."
   [git_remote_installed]="git-http 安装成功"
   [git_remote_install_failed]="自动安装失败，请手动安装 git-http 后重试"
+  [git_remote_hint]="当前使用的 git 是 %s，其目录缺少 git-remote-https。请改用带 HTTP 支持的 git，例如 Entware: opkg install git-http，或 SYNOCommunity 的 git 套件，并确保它在 PATH 中优先。"
   [lang_question]="请选择语言 / Choose language: 1) 中文 2) English [1]: "
   [lang_invalid]="无效的选择。 / Invalid choice."
   [lang_unsupported]="不支持的语言: %s（可选 zh|en）"
@@ -133,6 +134,7 @@ declare -A MSG_EN=(
   [git_remote_installing]="Attempting to install git-http support..."
   [git_remote_installed]="git-http installed successfully"
   [git_remote_install_failed]="Auto-install failed. Please install git-http manually and retry."
+  [git_remote_hint]="The git in use is %s and its libexec lacks git-remote-https. Install a git build with HTTP support (Entware: opkg install git-http, or the SynoCommunity git package) and make sure it comes first in PATH."
   [lang_question]="Please choose language / 请选择语言: 1) 中文 2) English [1]: "
   [lang_invalid]="Invalid choice. / 无效的选择。"
   [lang_unsupported]="Unsupported language: %s (zh|en)"
@@ -360,6 +362,8 @@ OWNER="${REPO%%/*}"
 IMAGE_NAME="ghcr.io/${REPO}/loopforge-sandbox:latest"
 LOOPFORGE_DIR="${LOOPFORGE_DIR:-/opt/loopforge}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 固定使用当前用户 PATH 中的 git，避免 sudo 自带的 git 缺少 remote-https
+GIT_BIN="$(command -v git || true)"
 
 msg summary_agents "${AGENTS_CLI:-$(msg none)}"
 echo
@@ -382,12 +386,14 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 # 步骤 0.5：检测并修复 git HTTPS 支持
-ensure_git_remote_https() {
+git_https_ready() {
   local exec_path
-  exec_path="$(git --exec-path)"
-  if [ -x "${exec_path}/git-remote-https" ] || [ -x "${exec_path}/git-remote-http" ]; then
-    return 0
-  fi
+  exec_path="$("$GIT_BIN" --exec-path 2>/dev/null || echo /nonexistent)"
+  [ -x "${exec_path}/git-remote-https" ] || [ -x "${exec_path}/git-remote-http" ]
+}
+
+ensure_git_remote_https() {
+  git_https_ready && return 0
 
   msg git_remote_missing
   echo
@@ -395,32 +401,25 @@ ensure_git_remote_https() {
   echo
 
   if command -v opkg >/dev/null 2>&1; then
-    if sudo opkg update && sudo opkg install git-http; then
-      msg git_remote_installed
-      echo
-      return 0
-    fi
+    sudo opkg update && sudo opkg install git-http || true
   elif command -v apt-get >/dev/null 2>&1; then
-    if sudo apt-get update && sudo apt-get install -y --reinstall git; then
-      msg git_remote_installed
-      echo
-      return 0
-    fi
+    sudo apt-get update && sudo apt-get install -y --reinstall git || true
   elif command -v yum >/dev/null 2>&1; then
-    if sudo yum install -y git; then
-      msg git_remote_installed
-      echo
-      return 0
-    fi
+    sudo yum install -y git || true
   elif command -v apk >/dev/null 2>&1; then
-    if sudo apk add git; then
-      msg git_remote_installed
-      echo
-      return 0
-    fi
+    sudo apk add git || true
+  fi
+
+  # 安装后复核：包管理器成功不代表当前 git 二进制就有该辅助程序
+  if git_https_ready; then
+    msg git_remote_installed
+    echo
+    return 0
   fi
 
   msg git_remote_install_failed
+  echo
+  msg git_remote_hint "$GIT_BIN"
   echo
   exit 1
 }
@@ -765,8 +764,14 @@ fi
 msg step6
 echo
 if [ ! -d "$LOOPFORGE_DIR/.git" ]; then
-  sudo git clone https://github.com/Tencent/LoopForge.git "$LOOPFORGE_DIR"
-  sudo chown -R "$(id -u):$(id -g)" "$LOOPFORGE_DIR"
+  LOOPFORGE_PARENT="$(dirname "$LOOPFORGE_DIR")"
+  if mkdir -p "$LOOPFORGE_PARENT" 2>/dev/null && [ -w "$LOOPFORGE_PARENT" ]; then
+    "$GIT_BIN" clone https://github.com/Tencent/LoopForge.git "$LOOPFORGE_DIR"
+  else
+    # 用 sudo 时必须指定同一个 git 二进制，否则 root 的 PATH 会命中缺少 remote-https 的版本
+    sudo -E env "PATH=$PATH" "$GIT_BIN" clone https://github.com/Tencent/LoopForge.git "$LOOPFORGE_DIR"
+    sudo chown -R "$(id -u):$(id -g)" "$LOOPFORGE_DIR"
+  fi
 fi
 cd "$LOOPFORGE_DIR"
 
